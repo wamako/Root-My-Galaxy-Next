@@ -1,0 +1,13 @@
+{
+  "kernel_sha256": "8c9b2084f6e451e81a7816b9c742dd89776b670d82f7c2ed84cd1f2f2a1ae577",
+  "corrected_words": [
+    {
+      "image_offset": "0x150200",
+      "previous": "0x9106d0219000b001",
+      "dzh3": "0x9105c0219000b001"
+    }
+  ],
+  "verified_words": 256,
+  "header_sha256": "a67b867ac7ecffd19d366e9fcdcca59eaf500f07f3df59cf2373dce52c42f903",
+  "status": "Source fingerprint corrected; no built or device-validated DZH3 payload exists."
+}

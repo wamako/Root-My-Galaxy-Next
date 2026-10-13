@@ -72,6 +72,7 @@ class UniversalVerdictTest {
         var reads = 0
         val lines = mutableListOf<String>()
         val late = UniversalRootRun.awaitRoot(
+            code = 2,
             windowMillis = 100,
             pollMillis = 10,
             now = { clock },
@@ -93,6 +94,7 @@ class UniversalVerdictTest {
         clock = 0L
         reads = 0
         val never = UniversalRootRun.awaitRoot(
+            code = 2,
             windowMillis = 100,
             pollMillis = 10,
             now = { clock },
@@ -106,6 +108,7 @@ class UniversalVerdictTest {
         clock = 0L
         reads = 0
         val unreadable = UniversalRootRun.awaitRoot(
+            code = 2,
             windowMillis = 0,
             pollMillis = 10,
             now = { clock },
@@ -115,6 +118,86 @@ class UniversalVerdictTest {
         assertEquals(UniversalRootRun.Reading.Nothing, unreadable)
         assertEquals("a zero window still polled more than once", 1, reads)
         assertEquals("a zero window slept, so a run with nothing to wait for still waits", 0L, clock)
+    }
+
+    @Test
+    fun `failed or unexpected chain results read once without waiting for root`() {
+        listOf(1, 3, -1, 99).forEach { code ->
+            var clock = 0L
+            var reads = 0
+            var sleeps = 0
+            val lines = mutableListOf<String>()
+            val reading = UniversalRootRun.awaitRoot(
+                code = code,
+                windowMillis = UniversalRootRun.LATE_ROOT_WINDOW_MILLIS,
+                now = { clock },
+                sleep = { sleeps++; clock += it },
+                read = { reads++; UniversalRootRun.Reading.Nothing },
+                report = { lines += it },
+            )
+
+            assertEquals("code $code did not preserve the phone's reading", UniversalRootRun.Reading.Nothing, reading)
+            assertEquals("code $code kept polling after the chain failed", 1, reads)
+            assertEquals("code $code spent time waiting for a daemon it did not reach", 0, sleeps)
+            assertTrue("code $code promised to wait for root after a failed chain", lines.isEmpty())
+            assertEquals(
+                "code $code was accepted as root without an observed root",
+                UniversalRootRun.Verdict.Failed,
+                UniversalRootRun.verdict(code, reading, canRead = true),
+            )
+        }
+    }
+
+    @Test
+    fun `a patch failure still preserves an observed live root`() {
+        var reads = 0
+        var sleeps = 0
+        val lines = mutableListOf<String>()
+        val reading = UniversalRootRun.awaitRoot(
+            code = 3,
+            windowMillis = UniversalRootRun.LATE_ROOT_WINDOW_MILLIS,
+            sleep = { sleeps++ },
+            read = { reads++; UniversalRootRun.Reading.Live },
+            report = { lines += it },
+        )
+
+        assertEquals(UniversalRootRun.Reading.Live, reading)
+        assertEquals("the phone was not asked exactly once after the patch failure", 1, reads)
+        assertEquals("an observed live root still waited", 0, sleeps)
+        assertTrue("an observed live root still promised a wait", lines.isEmpty())
+        assertEquals(
+            "the failed chain's code overrode an observed live root",
+            UniversalRootRun.Verdict.Rooted,
+            UniversalRootRun.verdict(code = 3, reading = reading, canRead = true),
+        )
+    }
+
+    @Test
+    fun `a successful chain can wait for a late live root`() {
+        var clock = 0L
+        var reads = 0
+        val lines = mutableListOf<String>()
+        val reading = UniversalRootRun.awaitRoot(
+            code = 0,
+            windowMillis = 100,
+            pollMillis = 10,
+            now = { clock },
+            sleep = { clock += it },
+            read = {
+                reads++
+                if (reads == 3) UniversalRootRun.Reading.Live else UniversalRootRun.Reading.Nothing
+            },
+            report = { lines += it },
+        )
+
+        assertEquals(UniversalRootRun.Reading.Live, reading)
+        assertEquals("a successful chain stopped before root became visible", 3, reads)
+        assertEquals("a successful chain did not spend the two polling intervals", 20L, clock)
+        assertEquals("a successful chain did not report its wait exactly once", 1, lines.size)
+        assertEquals(
+            UniversalRootRun.Verdict.Rooted,
+            UniversalRootRun.verdict(code = 0, reading = reading, canRead = true),
+        )
     }
 
     @Test

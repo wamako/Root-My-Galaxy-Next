@@ -1,0 +1,211 @@
+name: DZH3 diagnostic APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  diagnostic:
+    name: Build signed diagnostic APKs
+    if: github.repository == 'wamako/Root-My-Galaxy-Next' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout the source commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0 cmake;3.22.1'
+          accept-android-sdk-licenses: true
+
+      - name: Set up NDK r28
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r28
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Decode the repository signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE_BASE64:?Repository secret KEYSTORE_BASE64 is not set}"
+          : "${KEYSTORE_PASSWORD:?Repository secret KEYSTORE_PASSWORD is not set}"
+          : "${KEY_ALIAS:?Repository secret KEY_ALIAS is not set}"
+          : "${KEY_PASSWORD:?Repository secret KEY_PASSWORD is not set}"
+          umask 077
+          KEYSTORE_PATH="$RUNNER_TEMP/dzh3-diagnostic.p12"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+          {
+            echo "KEYSTORE_FILE=$KEYSTORE_PATH"
+            echo "KEYSTORE_TYPE=PKCS12"
+          } >> "$GITHUB_ENV"
+
+      - name: Run the full JVM test suite
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Build signed debug and release APKs
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleDebug assembleRelease --no-daemon
+
+      - name: Verify both APKs use the repository signing key
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_SHA256="$(keytool -exportcert -keystore "$KEYSTORE_FILE" \
+            -storetype "$KEYSTORE_TYPE" -storepass:env KEYSTORE_PASSWORD -alias "$KEY_ALIAS" \
+            | sha256sum | awk '{print $1}')"
+          [[ "$EXPECTED_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          shopt -s nullglob
+          APKS=(app/build/outputs/apk/release/*.apk app/build/outputs/apk/debug/*.apk)
+          if [ "${#APKS[@]}" -ne 2 ]; then
+            echo "::error::Expected one release APK and one debug APK."
+            exit 1
+          fi
+          for APK in "${APKS[@]}"; do
+            CERT="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK")"
+            SIGNED_SHA256="$(printf '%s\n' "$CERT" \
+              | awk '/Signer #1 certificate SHA-256 digest:/ {print $NF; exit}' \
+              | tr 'A-F' 'a-f')"
+            if [ "$SIGNED_SHA256" != "$EXPECTED_SHA256" ]; then
+              echo "::error::$APK is not signed with the repository key."
+              exit 1
+            fi
+            printf '%s: %s\n' "$APK" "$SIGNED_SHA256"
+          done
+          {
+            echo "### APK signing verification"
+            echo
+            echo "Both APKs match the repository key certificate: \`$EXPECTED_SHA256\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stage diagnostic APKs, checksums and release notes
+        id: assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION_NAME="$(sed -n 's/^val appVersionBase = "\([^"]*\)"/\1/p' app/build.gradle.kts)"
+          test -n "$VERSION_NAME"
+          SUFFIX="dzh3-diagnostic-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          TAG="dzh3-diagnostic-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          TITLE="DZH3 diagnostic APK ${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          mkdir -p diagnostic-assets
+          cp app/build/outputs/apk/release/*.apk "diagnostic-assets/RootMyGalaxyNext-${VERSION_NAME}-${SUFFIX}.apk"
+          cp app/build/outputs/apk/debug/*.apk "diagnostic-assets/RootMyGalaxyNext-${VERSION_NAME}-${SUFFIX}-debug.apk"
+          (
+            cd diagnostic-assets
+            sha256sum ./*.apk > SHA256SUMS
+          )
+          {
+            echo "# $TITLE"
+            echo
+            echo "**No DZH3 rooting support has been validated or added.**"
+            echo
+            echo "This APK contains failure-reporting fixes: an explicit native patch failure ends the run"
+            echo "without waiting for a root state that the failed chain did not establish."
+            echo "The corrected DZH3 fingerprint header is source-only research data. It is NOT wired into"
+            echo "the deployed payload and does not make this firmware rootable."
+            echo "DirtyFrag incompatibility is unchanged. No new rooting payload is included."
+            echo
+            echo "- Source commit: [$GITHUB_SHA]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA)"
+            echo "- Research and scope notes: [docs/dzh3/README.md]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/dzh3/README.md)"
+            echo "- Workflow run: [$GITHUB_RUN_NUMBER]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+            echo
+            echo "Download the APK ending in \`-debug.apk\` for diagnosis and export the app's run log"
+            echo "after an attempt. The other APK is the release build of the same diagnostic changes."
+            echo "Both signatures were verified against the configured repository signing key, and both"
+            echo "use package \`dev.rushiranpise.rmgnext\`. \`SHA256SUMS\` contains download checksums."
+            echo
+            echo "The full JVM suite, both APK builds and signature verification passed before publication."
+            echo "This is a diagnostic prerelease. A successful build does not establish working root."
+          } > diagnostic-assets/notes.md
+          {
+            echo "tag=$TAG"
+            echo "title=$TITLE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload signed diagnostic APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: dzh3-diagnostic-${{ github.run_number }}-${{ github.run_attempt }}
+          path: diagnostic-assets/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload JVM test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dzh3-test-reports-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/
+            dfr/build/reports/tests/testDebugUnitTest/
+            dfr/build/test-results/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Create the GitHub diagnostic prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DIAGNOSTIC_TAG: ${{ steps.assets.outputs.tag }}
+          DIAGNOSTIC_TITLE: ${{ steps.assets.outputs.title }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$DIAGNOSTIC_TAG" diagnostic-assets/*.apk diagnostic-assets/SHA256SUMS \
+            --target "$GITHUB_SHA" \
+            --title "$DIAGNOSTIC_TITLE" \
+            --notes-file diagnostic-assets/notes.md \
+            --prerelease \
+            --latest=false
+          {
+            echo "### Download the DZH3 diagnostic APK"
+            echo
+            echo "[$DIAGNOSTIC_TITLE]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$DIAGNOSTIC_TAG)"
+            echo
+            echo "No DZH3 rooting support has been validated or added."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the temporary signing keystore
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f "$RUNNER_TEMP/dzh3-diagnostic.p12"

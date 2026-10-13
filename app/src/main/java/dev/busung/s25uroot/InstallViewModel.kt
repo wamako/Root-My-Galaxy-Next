@@ -682,6 +682,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
             val code = (outcome as UniversalRootRun.Outcome.Ran).code
+            if (code != 0) {
+                appendLog("the chain reported: ${UniversalRootRun.describe(code)}")
+            }
             // Whether this app can look at the kernel decides both how long the phone is asked and what silence
             // means. With a shell, the module list answers seconds after the daemon `insmod`s it; without one,
             // nothing an app can read on this device can tell - the module list is denied and `/system/bin/su`
@@ -692,15 +695,14 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             // 4. Load KernelSU - and the reading that decides whether this run is a success. The chain's own
             //    `0` is its account of itself; the kernel is asked separately, because the two have already
             //    disagreed once on this device and the chain reported success while nothing was loaded.
-            setPhase(InstallPhase.LoadingKernelSu, app.getString(R.string.universal_step_load))
+            if (UniversalRootRun.chainReachedTheDaemon(code)) {
+                setPhase(InstallPhase.LoadingKernelSu, app.getString(R.string.universal_step_load))
+            }
             val reading = withContext(Dispatchers.IO) {
                 UniversalRootRun.awaitRoot(
+                    code = code,
                     windowMillis = if (canRead) UniversalRootRun.LATE_ROOT_WINDOW_MILLIS else 0L,
                 ) { line -> appendLog(line) }
-            }
-            if (code != 0) {
-                // Printed whichever way the verdict goes: it names the step the chain stopped at.
-                appendLog("the chain reported: ${UniversalRootRun.describe(code)}")
             }
             // What the "installed" line says depends on the verdict, and only on it: a verified root can be
             // stated, and an unverified one has to point at the manager instead of claiming a reading nobody made.
