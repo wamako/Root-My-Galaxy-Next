@@ -349,7 +349,7 @@ internal val installerSteps = listOf(
  *
  * Only the two steps whose payload-run text would be wrong are changed: the check is the same check, and the
  * last step is the same load. `Download` becomes the one step that both resolves and stages - this run picks
- * a payload before it fetches anything, which a payload run never does - and `Kernel exploit` says "Get
+ * a payload before it fetches anything, which a payload run never does - and `Kernel setup` says "Get
  * temporary root" on a path whose whole point is that no temporary root is involved. A step list that
  * describes a different run than the one happening is worse than no step list, because it reads as the run
  * being further along than it is.

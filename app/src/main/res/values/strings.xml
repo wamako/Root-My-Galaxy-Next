@@ -233,7 +233,7 @@
     <string name="universal_step_payload">Check the payload</string>
     <string name="universal_no_payload">No payload could be resolved for this phone, so nothing was done.</string>
     <string name="universal_step_daemon">Stage the daemon</string>
-    <string name="universal_step_exploit">Kernel exploit</string>
+    <string name="universal_step_exploit">Kernel setup</string>
     <string name="universal_step_load">Load KernelSU</string>
     <string name="universal_installed">Rooted : KernelSU is live in this boot.</string>
     <string name="action_open_manager">Open manager</string>
@@ -541,7 +541,7 @@
     <string name="step_daemon_detail">Stage the daemon and check the phone</string>
     <string name="step_exploit_detail_universal">Patch the vendor libraries and load the module</string>
     <string name="step_ksu_detail_universal">Start the service and check the phone</string>
-    <string name="step_exploit_title">Kernel exploit</string>
+    <string name="step_exploit_title">Kernel setup</string>
     <string name="step_exploit_detail">Get temporary root</string>
     <string name="step_ksu_title">Load KernelSU</string>
     <string name="step_ksu_detail">Load KernelSU and check that it works</string>
