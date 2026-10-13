@@ -1,0 +1,36 @@
+{
+  "source_sha256": "47ca1747cfc985a3973860caed86a8175a33cd40ab925322f2b3dbd9bf704cdd",
+  "source_size": 8586579,
+  "dtb_count": 22,
+  "exactly_consumed": true,
+  "notes": [
+    "The DTB concatenation contains platform variants; runtime selection cannot be established from the concatenation alone.",
+    "Static /memory reg entries may be placeholders replaced by the bootloader; zero size does not mean the device has zero RAM.",
+    "Reserved-memory reg entries are declarations in each static DTB, not a verified live memory map."
+  ],
+  "dtbs_summary_only": true,
+  "dtbs": [
+    {"index":0,"model":"Qualcomm Technologies, Inc. Cliffs SoC","compatible":"qcom,cliffs","qcom_msm_id":["0x266","0x10000"]},
+    {"index":1,"model":"Qualcomm Technologies, Inc. Cliffs 7 SoC","compatible":"qcom,cliffs","qcom_msm_id":["0x278","0x10000"]},
+    {"index":2,"model":"Qualcomm Technologies, Inc. Cliffs7P SoC","compatible":"qcom,cliffsp","qcom_msm_id":["0x2bc","0x10000","0x283","0x10000"]},
+    {"index":3,"model":"Qualcomm Technologies, Inc. CliffsP SoC","compatible":"qcom,cliffsp","qcom_msm_id":["0x282","0x10000"]},
+    {"index":4,"model":"Qualcomm Technologies, Inc. Pineapple QCM SoC","compatible":"qcom,pineapple","qcom_msm_id":["0x285","0x20000"]},
+    {"index":5,"model":"Qualcomm Technologies, Inc. Pineapple v2 SoC","compatible":"qcom,pineapple","qcom_msm_id":["0x22d","0x20000"]},
+    {"index":6,"model":"Qualcomm Technologies, Inc. PineappleP QCS SoC","compatible":"qcom,pineapplep","qcom_msm_id":["0x286","0x20000","0x2be","0x20000"]},
+    {"index":7,"model":"Qualcomm Technologies, Inc. PineappleP SG V2 SoC","compatible":"qcom,pineapplep","qcom_msm_id":["0x2aa","0x20000"]},
+    {"index":8,"model":"Qualcomm Technologies, Inc. PineappleP v2 SoC","compatible":"qcom,pineapplep","qcom_msm_id":["0x241","0x20000"]},
+    {"index":9,"model":"Qualcomm Technologies, Inc. PineappleQ v2 SoC","compatible":"qcom,pineappleq","qcom_msm_id":["0x2b8","0x20000"]},
+    {"index":10,"model":"Qualcomm Technologies, Inc. Volcano SoC","compatible":"qcom,volcano","qcom_msm_id":["0x27c","0x10000"]},
+    {"index":11,"model":"Qualcomm Technologies, Inc. Volcano6 SoC","compatible":"qcom,volcano","qcom_msm_id":["0x280","0x10000"]},
+    {"index":12,"model":"Qualcomm Technologies, Inc. Volcano6I FP1 SoC","compatible":"qcom,volcano","qcom_msm_id":["0x4000291","0x10000"]},
+    {"index":13,"model":"Qualcomm Technologies, Inc. Volcano6I FP2 SoC","compatible":"qcom,volcano","qcom_msm_id":["0x8000291","0x10000"]},
+    {"index":14,"model":"Qualcomm Technologies, Inc. Volcano6I FP3 SoC","compatible":"qcom,volcano","qcom_msm_id":["0xc000291","0x10000"]},
+    {"index":15,"model":"Qualcomm Technologies, Inc. Volcano6I FP4 SoC","compatible":"qcom,volcano","qcom_msm_id":["0x10000291","0x10000"]},
+    {"index":16,"model":"Qualcomm Technologies, Inc. Volcano6IP FP1 SoC","compatible":"qcom,volcanop","qcom_msm_id":["0x4000292","0x10000"]},
+    {"index":17,"model":"Qualcomm Technologies, Inc. Volcano6IP FP2 SoC","compatible":"qcom,volcanop","qcom_msm_id":["0x8000292","0x10000"]},
+    {"index":18,"model":"Qualcomm Technologies, Inc. Volcano6IP FP3 SoC","compatible":"qcom,volcanop","qcom_msm_id":["0xc000292","0x10000"]},
+    {"index":19,"model":"Qualcomm Technologies, Inc. Volcano6IP FP4 SoC","compatible":"qcom,volcanop","qcom_msm_id":["0x10000292","0x10000"]},
+    {"index":20,"model":"Qualcomm Technologies, Inc. Volcano6P SoC","compatible":"qcom,volcanop","qcom_msm_id":["0x281","0x10000"]},
+    {"index":21,"model":"Qualcomm Technologies, Inc. VolcanoP SoC","compatible":"qcom,volcanop","qcom_msm_id":["0x2c8","0x10000"]}
+  ]
+}
