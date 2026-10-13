@@ -240,8 +240,11 @@ internal object UniversalRootRun {
      *
      * A zero window is meaningful and used: with no way to look at the kernel, the wait has nothing to wait for
      * (see [canReadTheKernel]), so the run reads once and its verdict is the chain's own account.
+     * A chain that failed before starting the daemon also gets one reading, without polling or claiming that
+     * root was given to the phone. The reading still counts if root is already observable in this boot.
      */
     internal fun awaitRoot(
+        code: Int,
         windowMillis: Long = LATE_ROOT_WINDOW_MILLIS,
         pollMillis: Long = LATE_ROOT_POLL_MILLIS,
         now: () -> Long = { System.currentTimeMillis() },
@@ -249,6 +252,7 @@ internal object UniversalRootRun {
         read: () -> Reading = ::read,
         report: (String) -> Unit = {},
     ): Reading {
+        if (!chainReachedTheDaemon(code)) return read()
         val deadline = now() + windowMillis
         var polls = 0
         while (true) {
