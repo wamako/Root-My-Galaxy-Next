@@ -66,6 +66,9 @@ jobs:
             echo "KEYSTORE_TYPE=PKCS12"
           } >> "$GITHUB_ENV"
 
+      - name: Run native I/O and readback diagnostics tests
+        run: bash tools/test-native-io.sh
+
       - name: Run the full JVM test suite
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -136,8 +139,9 @@ jobs:
             echo
             echo "**No DZH3 rooting support has been validated or added.**"
             echo
-            echo "This APK contains failure-reporting fixes: an explicit native patch failure ends the run"
-            echo "without waiting for a root state that the failed chain did not establish."
+            echo "This APK verifies the first crash_dump64 patch by reading the bytes back before using the"
+            echo "vendor bridge, and checks helper I/O and child exit status. An explicit native patch failure"
+            echo "ends the run without waiting for a root state that the failed chain did not establish."
             echo "The corrected DZH3 fingerprint header is source-only research data. It is NOT wired into"
             echo "the deployed payload and does not make this firmware rootable."
             echo "DirtyFrag incompatibility is unchanged. No new rooting payload is included."
@@ -151,7 +155,8 @@ jobs:
             echo "Both signatures were verified against the configured repository signing key, and both"
             echo "use package \`dev.rushiranpise.rmgnext\`. \`SHA256SUMS\` contains download checksums."
             echo
-            echo "The full JVM suite, both APK builds and signature verification passed before publication."
+            echo "Native I/O/readback tests, the full JVM suite, both APK builds and signature verification"
+            echo "passed before publication."
             echo "This is a diagnostic prerelease. A successful build does not establish working root."
           } > diagnostic-assets/notes.md
           {

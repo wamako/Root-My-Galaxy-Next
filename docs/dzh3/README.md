@@ -20,8 +20,24 @@ without polling or announcing the KernelSU loading phase. A positive root readin
 counts even when the chain reports failure. Results that reached the daemon retain the
 existing bounded wait. The native result is logged before verification.
 
+The native code now reads back every byte of the first patch before executing the
+vendor bridge. It allows up to one second for submitted writes to become visible, then
+stops with the first mismatched byte if verification fails. A completed send is logged
+as an unverified write attempt rather than a successful patch.
+
+Helper waits now check `waitpid` errors before interpreting the child's status. Pipe
+reads collect all 16 bytes across short reads and interrupted calls, and report read
+errors separately from an empty successful exit.
+
 The regression tests cover failures, unexpected results, existing root after a failure,
-and late root after a successful chain.
+and late root after a successful chain. `tools/test-native-io.sh` exercises the native
+file, pipe and child-status operations with ordinary temporary files and harmless child
+processes. It does not execute the kernel exploit.
+
+For the next phone test, export the lines beginning with `patch #1 readback`. A mismatch
+establishes that the first write was not observed. A verified readback followed by the
+same vendor read failure narrows the remaining problem to the bridge. Neither result
+alone proves that this firmware can be rooted.
 
 ## Fingerprint research
 
