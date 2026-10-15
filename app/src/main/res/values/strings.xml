@@ -1182,6 +1182,14 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
     <string name="universal_choice_device">Device payload</string>
     <string name="universal_choice_generic">Generic payload</string>
     <!--
+      The third row, and it is the hiding build of the same generic daemon rather than a flavour: a source
+      publishes it as its own feed, it is a different artifact with a different digest, and a run that stages
+      it roots the phone exactly as the generic row does and additionally hides. Naming it here is the whole
+      reason it is a row: which of the two a phone ends up running is the person's choice to make.
+    -->
+    <string name="universal_choice_susfs">SUSFS payload</string>
+    <string name="universal_choice_susfs_note">the same generic daemon built with the hiding support compiled in</string>
+    <!--
       What the chain's confirmation states about the choice, in the labelled-row shape the run plan uses: this
       run has no payload profile to name, so which KernelSU and which build of it are the whole of what the
       person is agreeing to. The tier's words are the ones the row that was tapped used, so the screen and the

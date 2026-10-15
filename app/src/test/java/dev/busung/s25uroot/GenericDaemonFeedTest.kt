@@ -24,13 +24,56 @@ class GenericDaemonFeedTest {
         kmis: String = """["android12-5.10","android13-5.15","android14-6.1","android15-6.6"]""",
         version: String = "3.3.0",
         size: Long = 5475352,
+        susfs: Boolean = false,
     ): String = """
-        {"flavor":"$flavor","kmis":$kmis,"daemon":{
+        {"flavor":"$flavor","kmis":$kmis${
+        if (susfs) ""","susfs":true""" else ""
+    },"daemon":{
           "url":"https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-generic-kdp",
           "size":$size,
           "sha256":"f4121ed34eeb4656802f24a4d3d0f7b9eb07304f89c57ce16112027d590a2885",
           "version":"$version"}}
     """.trimIndent()
+
+    @Test
+    fun `each of the two generic rows gets its own build`() {
+        val daemons = GenericDaemonFeed.parse(
+            feed(
+                entry("kernelsu-next"),
+                entry("kernelsu-next", version = "3.4.1", susfs = true),
+            ).toByteArray(),
+        ).entries
+
+        assertEquals("the flag has to survive parsing", 1, daemons.count { it.susfs })
+        // The plain row stages the plain daemon and the hiding row the hiding one, whichever order a source
+        // listed them in. The two are separate artifacts with separate digests, so the row a person picked is
+        // the one their phone runs rather than a preference applied to the plain row on their behalf.
+        assertEquals(
+            "3.3.0",
+            daemons.covering(KernelSuFlavor.KernelSuNext, "android15-6.6", hiding = false)?.version,
+        )
+        assertEquals(
+            "3.4.1",
+            daemons.covering(KernelSuFlavor.KernelSuNext, "android15-6.6", hiding = true)?.version,
+        )
+    }
+
+    @Test
+    fun `the two generic rows fall back in one direction only`() {
+        // A source publishing only the hiding feed, which is the state this repository itself is in for every
+        // KMI but the one it has built: the plain row stages it rather than refusing, because a daemon carrying
+        // the hiding support roots a phone exactly like one that does not.
+        val hidingOnly = GenericDaemonFeed.parse(feed(entry("kernelsu-next", susfs = true)).toByteArray()).entries
+        assertEquals(
+            "3.3.0",
+            hidingOnly.covering(KernelSuFlavor.KernelSuNext, "android15-6.6", hiding = false)?.version,
+        )
+        // The other direction there is nothing to fall back to. The hiding row takes a daemon that carries the
+        // support or none at all: handing it a plain one would be a row saying SUSFS over a run that hides
+        // nothing, which is the one thing that row exists to make visible.
+        val plainOnly = GenericDaemonFeed.parse(feed(entry("kernelsu-next")).toByteArray()).entries
+        assertNull(plainOnly.covering(KernelSuFlavor.KernelSuNext, "android15-6.6", hiding = true))
+    }
 
     @Test
     fun `the published shape parses into what the run needs`() {
@@ -97,19 +140,50 @@ class GenericDaemonFeedTest {
     }
 
     @Test
+    fun `only the flavours with a hiding daemon for this kernel are covered`() {
+        // What the sheet asks, one tier up from `covering` and with the same rule behind it: the flavour whose
+        // hiding daemon carries this KMI counts, the one whose daemon carries another kernel does not, and
+        // neither does a flavour with no hiding daemon at all.
+        val daemons = GenericDaemonFeed.parse(
+            feed(
+                entry("kernelsu-next", susfs = true),
+                entry("kernelsu", kmis = """["android14-6.1"]""", susfs = true),
+                entry("resukisu"),
+            ).toByteArray(),
+        ).entries
+
+        assertEquals(setOf(KernelSuFlavor.KernelSuNext), daemons.hidingFlavorsFor("android15-6.6"))
+        // A kernel that could not be read covers nothing, and the caller has to tell that from a feed nobody
+        // published: the answer is empty either way, and only the caller knows whether it did the reading.
+        assertEquals(emptySet<KernelSuFlavor>(), daemons.hidingFlavorsFor(null))
+    }
+
+    @Test
     fun `the KMI decides, and a miss is a miss`() {
         val daemons = GenericDaemonFeed.parse(
             feed(entry("kernelsu"), entry("resukisu", kmis = """["android14-6.1"]"""))
                 .toByteArray(),
         ).entries
 
-        assertEquals(KernelSuFlavor.KernelSu, daemons.covering(KernelSuFlavor.KernelSu, "android15-6.6")?.flavor)
+        assertEquals(
+            KernelSuFlavor.KernelSu,
+            daemons.covering(KernelSuFlavor.KernelSu, "android15-6.6", hiding = false)?.flavor,
+        )
         // The same phone asking for the other flavour gets the daemon that carries its KMI...
-        assertEquals(KernelSuFlavor.ReSukiSU, daemons.covering(KernelSuFlavor.ReSukiSU, "android14-6.1")?.flavor)
+        assertEquals(
+            KernelSuFlavor.ReSukiSU,
+            daemons.covering(KernelSuFlavor.ReSukiSU, "android14-6.1", hiding = false)?.flavor,
+        )
         // ...and nothing at all when the flavour's daemon carries a different family. A null here is what
         // makes the run refuse rather than load a module for somebody else's kernel.
-        assertNull(daemons.covering(KernelSuFlavor.ReSukiSU, "android15-6.6"))
-        assertNull("a device whose KMI could not be read covers nothing", daemons.covering(KernelSuFlavor.KernelSu, null))
-        assertNull("an unpublished flavour is not filled in from another", daemons.covering(KernelSuFlavor.KernelSuNext, "android15-6.6"))
+        assertNull(daemons.covering(KernelSuFlavor.ReSukiSU, "android15-6.6", hiding = false))
+        assertNull(
+            "a device whose KMI could not be read covers nothing",
+            daemons.covering(KernelSuFlavor.KernelSu, null, hiding = false),
+        )
+        assertNull(
+            "an unpublished flavour is not filled in from another",
+            daemons.covering(KernelSuFlavor.KernelSuNext, "android15-6.6", hiding = false),
+        )
     }
 }

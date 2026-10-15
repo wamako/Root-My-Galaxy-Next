@@ -52,16 +52,17 @@ class PayloadChoiceTest {
         query: String = "",
         flavor: KernelSuFlavor? = null,
         deviceCoverage: Set<KernelSuFlavor>? = null,
-    ) = payloadRows(profiles, device, fitsDeviceOnly, query, flavor, deviceCoverage)
+        susfsCoverage: Set<KernelSuFlavor>? = null,
+    ) = payloadRows(profiles, device, fitsDeviceOnly, query, flavor, deviceCoverage, susfsCoverage)
 
     @Test
     fun `the device toggle narrows the payloads and never the universal rows`() {
         // Both halves in one case, because the interesting fact is the difference between them: the same call,
-        // the same toggle, two answers. Three device payloads become one; six universal rows stay six.
+        // the same toggle, two answers. Three device payloads become one; nine universal rows stay nine.
         assertEquals(3, rows(fitsDeviceOnly = false).device.size)
         assertEquals(1, rows(fitsDeviceOnly = true).device.size)
-        assertEquals(6, rows(fitsDeviceOnly = false).universal.size)
-        assertEquals(6, rows(fitsDeviceOnly = true).universal.size)
+        assertEquals(9, rows(fitsDeviceOnly = false).universal.size)
+        assertEquals(9, rows(fitsDeviceOnly = true).universal.size)
     }
 
     @Test
@@ -72,7 +73,7 @@ class PayloadChoiceTest {
         // the feed, not this list.
         val none = rows(profiles = emptyList(), fitsDeviceOnly = true)
         assertTrue(none.device.isEmpty())
-        assertEquals(6, none.universal.size)
+        assertEquals(9, none.universal.size)
         assertFalse(none.isEmpty)
     }
 
@@ -85,10 +86,13 @@ class PayloadChoiceTest {
             listOf(
                 KernelSuFlavor.KernelSu to PayloadTier.Device,
                 KernelSuFlavor.KernelSu to PayloadTier.Generic,
+                KernelSuFlavor.KernelSu to PayloadTier.Susfs,
                 KernelSuFlavor.KernelSuNext to PayloadTier.Device,
                 KernelSuFlavor.KernelSuNext to PayloadTier.Generic,
+                KernelSuFlavor.KernelSuNext to PayloadTier.Susfs,
                 KernelSuFlavor.ReSukiSU to PayloadTier.Device,
                 KernelSuFlavor.ReSukiSU to PayloadTier.Generic,
+                KernelSuFlavor.ReSukiSU to PayloadTier.Susfs,
             ),
             listed,
         )
@@ -105,23 +109,68 @@ class PayloadChoiceTest {
         assertEquals(
             listOf(
                 KernelSuFlavor.KernelSu to PayloadTier.Generic,
+                KernelSuFlavor.KernelSu to PayloadTier.Susfs,
                 KernelSuFlavor.KernelSuNext to PayloadTier.Device,
                 KernelSuFlavor.KernelSuNext to PayloadTier.Generic,
+                KernelSuFlavor.KernelSuNext to PayloadTier.Susfs,
                 KernelSuFlavor.ReSukiSU to PayloadTier.Generic,
+                KernelSuFlavor.ReSukiSU to PayloadTier.Susfs,
             ),
             nextOnly.universal.map { it.flavor to it.tier },
         )
         // The phone this flow exists for: no source has an entry at all, so the three device rows are gone and
-        // the three generic ones stand - a sheet that is not empty, because something here can still root it.
+        // the six daemon rows stand - a sheet that is not empty, because something here can still root it.
         val noneCovered = rows(deviceCoverage = emptySet())
-        assertEquals(3, noneCovered.universal.size)
-        assertTrue(noneCovered.universal.all { it.tier == PayloadTier.Generic })
+        assertEquals(6, noneCovered.universal.size)
+        assertTrue(noneCovered.universal.all { it.tier != PayloadTier.Device })
         assertFalse(noneCovered.isEmpty)
         // And an unread catalog covers nobody and hides nothing: the null is "not known", not "nothing", and
         // dropping rows over it would be the app answering from a read it never made.
-        assertEquals(6, rows(deviceCoverage = null).universal.size)
-        assertEquals(6, rows(profiles = emptyList(), deviceCoverage = null).universal.size)
-        assertEquals(3, rows(profiles = emptyList(), deviceCoverage = emptySet()).universal.size)
+        assertEquals(9, rows(deviceCoverage = null).universal.size)
+        assertEquals(9, rows(profiles = emptyList(), deviceCoverage = null).universal.size)
+        assertEquals(6, rows(profiles = emptyList(), deviceCoverage = emptySet()).universal.size)
+    }
+
+    @Test
+    fun `a hiding row is listed only for a flavour the sources publish a hiding daemon for`() {
+        // The third tier's own feed, read by the sheet's caller and handed in here. A flavour the sources
+        // publish no hiding daemon for is a row whose only content is a sentence the run would produce after
+        // the tap, so the sheet leaves it out - and the generic row beside it is what covers that phone.
+        val nextOnly = rows(susfsCoverage = setOf(KernelSuFlavor.KernelSuNext))
+        assertEquals(
+            listOf(
+                KernelSuFlavor.KernelSu to PayloadTier.Device,
+                KernelSuFlavor.KernelSu to PayloadTier.Generic,
+                KernelSuFlavor.KernelSuNext to PayloadTier.Device,
+                KernelSuFlavor.KernelSuNext to PayloadTier.Generic,
+                KernelSuFlavor.KernelSuNext to PayloadTier.Susfs,
+                KernelSuFlavor.ReSukiSU to PayloadTier.Device,
+                KernelSuFlavor.ReSukiSU to PayloadTier.Generic,
+            ),
+            nextOnly.universal.map { it.flavor to it.tier },
+        )
+        // A source publishing no hiding feed at all is every source but this fork's, and that takes the three
+        // rows away - which is the state the sheet used to draw them in.
+        val none = rows(susfsCoverage = emptySet())
+        assertEquals(6, none.universal.size)
+        assertTrue(none.universal.none { it.tier == PayloadTier.Susfs })
+        // An unread feed hides nothing: null is "not known", not "nobody publishes one".
+        assertEquals(9, rows(susfsCoverage = null).universal.size)
+        // The two sets are read from different feeds and decide different tiers, so neither can stand in for
+        // the other: here one flavour is covered by the catalog and a different one by the hiding feed.
+        assertEquals(
+            listOf(
+                KernelSuFlavor.KernelSu to PayloadTier.Device,
+                KernelSuFlavor.KernelSu to PayloadTier.Generic,
+                KernelSuFlavor.KernelSuNext to PayloadTier.Generic,
+                KernelSuFlavor.ReSukiSU to PayloadTier.Generic,
+                KernelSuFlavor.ReSukiSU to PayloadTier.Susfs,
+            ),
+            rows(
+                deviceCoverage = setOf(KernelSuFlavor.KernelSu),
+                susfsCoverage = setOf(KernelSuFlavor.ReSukiSU),
+            ).universal.map { it.flavor to it.tier },
+        )
     }
 
     @Test
@@ -133,11 +182,12 @@ class PayloadChoiceTest {
             listOf(
                 KernelSuFlavor.KernelSuNext to PayloadTier.Device,
                 KernelSuFlavor.KernelSuNext to PayloadTier.Generic,
+                KernelSuFlavor.KernelSuNext to PayloadTier.Susfs,
             ),
             next.universal.map { it.flavor to it.tier },
         )
-        assertEquals(2, rows(flavor = KernelSuFlavor.ReSukiSU).universal.size)
-        assertEquals(6, rows(flavor = null).universal.size)
+        assertEquals(3, rows(flavor = KernelSuFlavor.ReSukiSU).universal.size)
+        assertEquals(9, rows(flavor = null).universal.size)
     }
 
     @Test
@@ -146,16 +196,22 @@ class PayloadChoiceTest {
         // here, "DirtyFrag" is the technique, the number is the CVE the sheet prints in its header, and the
         // flavour and tier are the two facts the row itself carries. Someone who read about the bug has the
         // number, so a search that only knew the first word would find nothing for them.
-        assertEquals(6, rows(query = "dirtyfrag").universal.size)
-        assertEquals(6, rows(query = UniversalRootRun.CVE).universal.size)
-        assertEquals(6, rows(query = "universal").universal.size)
+        assertEquals(9, rows(query = "dirtyfrag").universal.size)
+        assertEquals(9, rows(query = UniversalRootRun.CVE).universal.size)
+        assertEquals(9, rows(query = "universal").universal.size)
         assertEquals(3, rows(query = "generic").universal.size)
+        // The hiding row's own word, which is the one thing that tells it from the generic row above it: the
+        // two are the same daemon, so nothing else on them matches a search for it.
         assertEquals(
-            listOf(PayloadTier.Device, PayloadTier.Generic),
+            listOf(PayloadTier.Susfs, PayloadTier.Susfs, PayloadTier.Susfs),
+            rows(query = "susfs").universal.map { it.tier },
+        )
+        assertEquals(
+            listOf(PayloadTier.Device, PayloadTier.Generic, PayloadTier.Susfs),
             rows(query = "resukisu").universal.map { it.tier },
         )
         // And by the flavour's id, which is what the feed writes and what somebody copying from one may type.
-        assertEquals(2, rows(query = "kernelsu-next").universal.size)
+        assertEquals(3, rows(query = "kernelsu-next").universal.size)
     }
 
     @Test
@@ -181,7 +237,7 @@ class PayloadChoiceTest {
         // The two kinds share one selection, so their keys share one namespace. A collision is not a cosmetic
         // bug here: the list's keys would be duplicated and picking one row would draw another as picked.
         val all = rows().all
-        assertEquals(9, all.size)
+        assertEquals(12, all.size)
         assertEquals(all.size, all.map { it.key }.distinct().size)
 
         // A device row's key is the profile's own selection id, because that is what the run is started by;
@@ -199,9 +255,9 @@ class PayloadChoiceTest {
         // one row that can always be run - including on a phone no source has an entry for. The payloads the
         // sources published follow it, in full, so nothing was lost by leading with it.
         val all = rows().all
-        assertEquals(9, all.size)
-        assertTrue(all.take(6).all { it is PayloadChoice.Universal })
-        assertTrue(all.drop(6).all { it is PayloadChoice.Device })
+        assertEquals(12, all.size)
+        assertTrue(all.take(9).all { it is PayloadChoice.Universal })
+        assertTrue(all.drop(9).all { it is PayloadChoice.Device })
     }
 
     private fun snapshot(model: String, kernelRelease: String) = DeviceSnapshot(

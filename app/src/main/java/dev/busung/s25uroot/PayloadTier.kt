@@ -12,6 +12,11 @@ package dev.busung.s25uroot
  * - [Generic] is the KMI-generic daemon for the same flavour: one artifact carrying a module per KMI, which
  *   covers every phone whose kernel belongs to that family. It exists for phones with no entry of their own,
  *   and it is what makes this path useful on a device nobody has ported yet.
+ * - [Susfs] is that same generic daemon built with the hiding support compiled in, which a source publishes
+ *   as a second feed. It roots the phone exactly as the generic one does and additionally hides what the
+ *   kernel is asked about; it is a row of its own rather than a preference the app applies to [Generic],
+ *   because which of the two a phone ends up running is not a detail the person choosing can be left to
+ *   find out from the log.
  *
  * The reason this is a question rather than a preference the app guesses at: the two produce visibly
  * different runs. A generic run loads a module that was not built for the phone's own release and relies on
@@ -29,6 +34,17 @@ enum class PayloadTier {
 
     /** The KMI-generic daemon for the chosen flavour, covering a family of kernels. */
     Generic,
+
+    /**
+     * The KMI-generic daemon for the chosen flavour, built with the hiding support compiled in.
+     *
+     * A tier rather than a flag on [Generic] for the reason the app has tiers at all: the two stage
+     * different artifacts with different sizes and different digests, a run reports which one it used, and a
+     * boot run stages the one it recorded. A source that publishes no hiding daemon for this phone's kernel
+     * is not a fallback - this row refuses, and says so, rather than quietly running the plain one under a
+     * word that promised otherwise.
+     */
+    Susfs,
     ;
 
     companion object {

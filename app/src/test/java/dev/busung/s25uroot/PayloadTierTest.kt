@@ -32,6 +32,6 @@ class PayloadTierTest {
 
     @Test
     fun `the ids are listed for a message that has to name them`() {
-        assertEquals(listOf("Device", "Generic"), PayloadTier.ids)
+        assertEquals(listOf("Device", "Generic", "Susfs"), PayloadTier.ids)
     }
 }

@@ -39,6 +39,14 @@ data class GenericDaemon(
     val daemon: RemoteArtifact,
     /** The KernelSU release the daemon was built from, when the feed says. */
     val version: String?,
+    /**
+     * Whether this daemon was built with the hiding tier compiled in, as its feed declares.
+     *
+     * A property of the artifact, not of the file it was read from: a daemon that carries susfs roots the
+     * phone exactly like one that does not, and additionally hides - so where both are published for a
+     * KMI, this is what lets `covering()` hand each of the two generic rows its own build.
+     */
+    val susfs: Boolean = false,
     val sourceId: String = "",
     val sourceLabel: String = "",
     val sourceCommit: String = "",
@@ -67,6 +75,17 @@ data class GenericDaemonFeed(
     companion object {
         /** Where a payload repository keeps it, beside the manifest it is read from. */
         const val PATH = "support/kernelsu-generic.json"
+
+        /**
+         * The same tier, built with the hiding support compiled in.
+         *
+         * A second file rather than more entries in [PATH], and that is upstream's own arrangement, not
+         * this app's: that feed holds one entry per flavour, so a hiding daemon listed there would replace
+         * the plain one for every phone in the KMI. A source that does not publish this file is the normal
+         * case for every repository except the one this fork ships, so a missing file is not a failure -
+         * see `PayloadRepository.loadGenericDaemons()`.
+         */
+        const val SUSFS_PATH = "support/kernelsu-generic-susfs.json"
 
         /** The only shape this build reads. A different one is a feed written for a different app. */
         const val SUPPORTED_SCHEMA = 1
@@ -106,6 +125,9 @@ data class GenericDaemonFeed(
                             kmis = kmis,
                             daemon = daemon.artifact(),
                             version = daemon.declaredVersion(),
+                            // Declared by the feed rather than inferred from which file it was read out of,
+                            // because a source is free to publish the same daemon from either path.
+                            susfs = entry.optBoolean("susfs", false),
                         ),
                     )
                 }
@@ -125,6 +147,39 @@ data class GenericDaemonFeed(
  *
  * A phone whose KMI no entry covers gets null and is told which KMIs there were, rather than being handed
  * a daemon that would fail at `finit_module`.
+ *
+ * [hiding] is which of the two generic tiers is asking, and the two are not symmetrical:
+ *
+ * - the plain tier takes a daemon that does not carry the hiding support, and falls back to one that does
+ *   when that is all a source publishes for this kernel. The fallback is not a silent upgrade of the run -
+ *   a hiding daemon roots the phone exactly like a plain one, so it cannot lead somewhere the row did not
+ *   promise - and it is what keeps a phone whose source publishes only the second feed rootable at all.
+ * - the hiding tier takes **only** a daemon that carries the support. Handing it a plain one would be a row
+ *   saying "susfs" over a run that hides nothing, which is the single thing that row exists to make
+ *   visible, so there is no fallback and the run refuses instead.
  */
-internal fun List<GenericDaemon>.covering(flavor: KernelSuFlavor, kmi: String?): GenericDaemon? =
-    firstOrNull { it.flavor == flavor && it.covers(kmi) }
+internal fun List<GenericDaemon>.covering(
+    flavor: KernelSuFlavor,
+    kmi: String?,
+    hiding: Boolean,
+): GenericDaemon? {
+    val forKernel = filter { it.flavor == flavor && it.covers(kmi) }
+    return if (hiding) {
+        forKernel.firstOrNull { it.susfs }
+    } else {
+        forKernel.firstOrNull { !it.susfs } ?: forKernel.firstOrNull()
+    }
+}
+
+/**
+ * The flavours the read sources publish a hiding daemon for, of the ones that carry a module for [kmi].
+ *
+ * The payload sheet's question about the hiding tier, and answered with the same call the run makes
+ * ([covering]) rather than a comparison of its own: a flavour left out of this set is a flavour whose row
+ * could only lead to the run's own refusal, which is the tap the row exists to save.
+ *
+ * A null [kmi] covers nothing, so the answer is empty and the caller has to tell that from a read it never
+ * made - the reading itself, and what an unread kernel means, belong to whoever did the reading.
+ */
+internal fun List<GenericDaemon>.hidingFlavorsFor(kmi: String?): Set<KernelSuFlavor> =
+    KernelSuFlavor.entries.filterTo(mutableSetOf()) { covering(it, kmi, hiding = true) != null }

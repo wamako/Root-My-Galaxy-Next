@@ -438,23 +438,20 @@ class PayloadRepository(private val context: Context) {
         for (source in sources) {
             try {
                 val commit = resolveCommit(source)
-                val bytes = downloadBytes(rawUrl(source, commit, GenericDaemonFeed.PATH), MAX_MANIFEST_BYTES)
-                val feed = GenericDaemonFeed.parse(bytes)
-                for (ignored in feed.ignored) {
-                    AppLog.warn(
-                        AppLogTags.CATALOG,
-                        "Ignoring a generic daemon declaring flavour \"$ignored\": this build knows " +
-                            KernelSuFlavor.ids,
-                    )
-                }
-                daemons += feed.entries.map { entry ->
-                    entry.copy(
-                        sourceId = source.id,
-                        sourceLabel = source.label,
-                        sourceCommit = commit,
-                        daemon = entry.daemon.copy(url = pinArtifactUrl(source, entry.daemon.url, commit)),
-                    )
-                }
+                // Two files, one source, one failure list: the hiding tier is a second feed beside the
+                // first, and a source that carries only one of them is not a broken source. So the first
+                // path is the source's own answer - if it cannot be read, the source failed - and the
+                // second is read for what it adds, with its absence logged and nothing else.
+                daemons += loadGenericFeed(source, commit, GenericDaemonFeed.PATH)
+                daemons += runCatching { loadGenericFeed(source, commit, GenericDaemonFeed.SUSFS_PATH) }
+                    .onFailure { missing ->
+                        AppLog.info(
+                            AppLogTags.CATALOG,
+                            "${source.label} publishes no hiding daemon: " +
+                                "${missing.message ?: missing.javaClass.simpleName}",
+                        )
+                    }
+                    .getOrDefault(emptyList())
             } catch (error: Throwable) {
                 val detail = context.getString(
                     R.string.repo_source_failed,
@@ -470,6 +467,32 @@ class PayloadRepository(private val context: Context) {
             "Generic daemons: ${daemons.size} entries from ${sources.size - failures.size}/${sources.size} sources",
         )
         return LoadedGenericDaemons(daemons, failures)
+    }
+
+    /**
+     * The daemons one feed of one source offers, pinned to the revision it was read at.
+     *
+     * One reader for both paths, because the two files are the same schema - which is upstream's own
+     * arrangement and the reason a second tier could be added here without a second parser.
+     */
+    private fun loadGenericFeed(source: PayloadSource, commit: String, path: String): List<GenericDaemon> {
+        val bytes = downloadBytes(rawUrl(source, commit, path), MAX_MANIFEST_BYTES)
+        val feed = GenericDaemonFeed.parse(bytes)
+        for (ignored in feed.ignored) {
+            AppLog.warn(
+                AppLogTags.CATALOG,
+                "Ignoring a generic daemon declaring flavour \"$ignored\": this build knows " +
+                    KernelSuFlavor.ids,
+            )
+        }
+        return feed.entries.map { entry ->
+            entry.copy(
+                sourceId = source.id,
+                sourceLabel = source.label,
+                sourceCommit = commit,
+                daemon = entry.daemon.copy(url = pinArtifactUrl(source, entry.daemon.url, commit)),
+            )
+        }
     }
 
     /**

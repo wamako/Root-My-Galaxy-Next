@@ -181,6 +181,17 @@ data class TargetCatalogUiState(
     val profiles: List<TargetProfile> = emptyList(),
     val error: String? = null,
     val sourceFailures: List<String> = emptyList(),
+    /**
+     * The flavours the sources publish a hiding daemon for that covers this phone's kernel, or null while
+     * that is not known.
+     *
+     * Read from the second generic feed rather than resolved out of [profiles], because the hiding tier has
+     * no device entries at all: a source publishing it is the whole of the fact. Null is "not read" - while
+     * the feed is being read, and after a read that failed or that no source answered - and the sheet lists
+     * every hiding row for it, because hiding a row over a read the app never made is the sheet answering a
+     * question with its own missing data.
+     */
+    val susfsCoverage: Set<KernelSuFlavor>? = null,
 )
 
 private data class CommandResult(val code: Int, val output: String)
@@ -479,8 +490,33 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             } catch (error: Throwable) {
                 TargetCatalogUiState(error = error.message ?: error.javaClass.simpleName)
             }
+            // Then the hiding tier, in a second pass: it is another feed, and the list above is already
+            // usable without it - a sheet that waited for both would hold the payloads back behind a read
+            // that can only ever take rows away.
+            if (mutableTargetCatalog.value.error == null) {
+                hidingCoverage()?.let { coverage ->
+                    mutableTargetCatalog.value = mutableTargetCatalog.value.copy(susfsCoverage = coverage)
+                }
+            }
         }
     }
+
+    /**
+     * Which flavours the enabled sources publish a hiding daemon for, for this phone's kernel.
+     *
+     * Null when that could not be read at all - every enabled source failed, or the source list itself could
+     * not be read - because then nothing is known about the tier and the sheet must not take rows away over
+     * it. A source that answered is enough to know what *it* publishes: the same trade [loadCatalog] makes,
+     * where a source that failed is named in `sourceFailures` rather than taking the whole list down.
+     */
+    private fun hidingCoverage(): Set<KernelSuFlavor>? = runCatching {
+        val loaded = repository.loadGenericDaemons()
+        if (loaded.daemons.isEmpty() && loaded.failures.isNotEmpty()) {
+            null
+        } else {
+            loaded.daemons.hidingFlavorsFor(DeviceSnapshot.current().kmi)
+        }
+    }.getOrNull()
 
     /**
      * Runs an install and returns once it reaches a terminal phase, for callers outside the

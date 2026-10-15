@@ -20,7 +20,7 @@ import java.security.SecureRandom
  * an **unprivileged** `IpSecManager` transform the technique DirtyInit found and DFRoot used. On a phone
  * with no root at all and nothing installed, this is a root path that starts from this APK alone.
  *
- * ## The daemon comes from the payload, in one of two tiers
+ * ## The daemon comes from the payload, in one of three tiers
  *
  * The daemon is not bundled: it is downloaded from the payload repository for the flavour the run asks for,
  * and placed where the shellcode reads it. That is what keeps the argv and the daemon a matched pair the
@@ -28,7 +28,7 @@ import java.security.SecureRandom
  * one built for that flavour's line.
  *
  * And because the KernelSU half of a payload is the one half that does **not** have to be device-specific,
- * there are two things it can be. They are offered as a choice rather than guessed at ([PayloadTier]):
+ * there are three things it can be. They are offered as a choice rather than guessed at ([PayloadTier]):
  *
  * - **Device** the feed's entry for this exact phone, whose module was built for the kernel release it
  *   runs. The strongest pairing available, so it is the default.
@@ -36,10 +36,14 @@ import java.security.SecureRandom
  *   whole family of phones. What it has instead of a device-specific module is the daemon's own `vermagic`
  *   rewrite: `load_module()` replaces the module's vermagic with the value the running kernel requires and
  *   retries `init_module`, which is what lets one artifact cover a KMI family.
+ * - **Susfs** that same generic daemon built with the hiding support compiled in, which a source publishes
+ *   as its own feed. A separate row rather than something the generic row does when it happens to be
+ *   published, because the two are different artifacts with different digests and which one a phone ends
+ *   up running is not a detail to be discovered from the log afterwards.
  *
- * Neither is used for the other's device behind anyone's back, and a tier that cannot serve this phone says
- * so *before* anything is downloaded: the device tier refuses when the feed has no entry for this phone, and
- * the generic tier refuses when its entry carries no module for this phone's KMI.
+ * None is used for another's device behind anyone's back, and a tier that cannot serve this phone says so
+ * *before* anything is downloaded: the device tier refuses when the feed has no entry for this phone, and a
+ * generic tier refuses when its entry carries no module for this phone's KMI.
  *
  * ## Running it
  *
@@ -377,13 +381,30 @@ internal object UniversalRootRun {
         }
 
         /** A daemon carrying a module per KMI, so it covers a family of kernels rather than this phone. */
-        class Generic(val daemon: GenericDaemon) : Plan() {
+        class Generic(
+            val daemon: GenericDaemon,
+            /**
+             * The tier that asked for it, which is not read off the daemon.
+             *
+             * [PayloadTier.Generic] whose source publishes no plain daemon for this kernel falls back to a
+             * hiding one, and a boot run asks for the tier the retry was armed with - so recording the
+             * artifact's kind here would make that boot refuse the daemon its own run staged.
+             */
+            override val tier: PayloadTier,
+        ) : Plan() {
             override val flavor: KernelSuFlavor get() = daemon.flavor
             override val version: String? get() = daemon.version
             override val artifact: RemoteArtifact get() = daemon.daemon
-            override val tier: PayloadTier get() = PayloadTier.Generic
+
+            /** Which build of it is being staged, said rather than left to the digest to reveal. */
+            val hiding: Boolean get() = daemon.susfs
+
             override val description: String
-                get() = "generic payload: ${daemon.flavor.label}, carrying ${daemon.coverage}"
+                get() = buildString {
+                    append("generic payload: ${daemon.flavor.label}, carrying ${daemon.coverage}")
+                    if (daemon.susfs) append(", built with the hiding support")
+                }
+
             override val caveat: String
                 get() = "a shared build for every ${daemon.flavor.label} kernel in ${daemon.coverage}: the " +
                     "module it loads is chosen by the running kernel's KMI rather than built for this phone"
@@ -422,10 +443,12 @@ internal object UniversalRootRun {
      * this fallback replaces: the sentence it threw told the reader to choose the generic payload, which is
      * exactly what the run now does for them.
      *
-     * What can still refuse is the generic lookup, and it refuses for the one thing that is genuinely missing:
-     * no daemon covering this kernel. That sentence is deliberately different from the device tier's old one,
-     * because "the feed has no entry for this phone" and "its generic daemon carries no module for this kernel"
-     * call for different things from whoever reads them.
+     * What can still refuse is either generic lookup, and it refuses for the one thing that is genuinely
+     * missing: no daemon of the kind that row asked for covering this kernel. That sentence is deliberately
+     * different from the device tier's old one, because "the feed has no entry for this phone" and "its generic
+     * daemon carries no module for this kernel" call for different things from whoever reads them - and the
+     * hiding tier has a third of its own, since a plain daemon covering the kernel is not a near miss for it
+     * but the other choice.
      *
      * Downloads nothing, so a refusal costs the sentence and not a byte.
      */
@@ -457,10 +480,23 @@ internal object UniversalRootRun {
             if (profile != null) return Plan.Device(profile)
         }
         val loaded = repository.loadGenericDaemons()
-        val covering = loaded.daemons.covering(flavor, snapshot.kmi)
+        val hiding = tier == PayloadTier.Susfs
+        val covering = loaded.daemons.covering(flavor, snapshot.kmi, hiding)
         if (covering == null) {
+            // What the sources publish for this flavour, which is what tells the two noes apart: a daemon that
+            // carries other kernels, or no daemon of this kind at all. The hiding tier gets its own answer
+            // because a plain daemon covering this kernel is not a near miss for it, it is the other choice.
             val published = loaded.daemons.firstOrNull { it.flavor == flavor }
+            val hidingPublished = loaded.daemons.firstOrNull { it.flavor == flavor && it.susfs }
             val because = when {
+                hiding && hidingPublished != null ->
+                    "the hiding ${flavor.label} daemon carries ${hidingPublished.coverage}, and this " +
+                        "phone's kernel is ${snapshot.kmi ?: snapshot.kernelRelease}, so it has no " +
+                        "module for this phone"
+                hiding && loaded.failures.isNotEmpty() -> loaded.failures.joinToString("\n")
+                hiding ->
+                    "no ${flavor.label} daemon built with the hiding support is published by the enabled " +
+                        "sources, so there is no susfs payload to stage"
                 published != null ->
                     "the generic ${flavor.label} daemon carries ${published.coverage}, and this " +
                         "phone's kernel is ${snapshot.kmi ?: snapshot.kernelRelease}, so it has no " +
@@ -470,7 +506,7 @@ internal object UniversalRootRun {
             }
             throw IllegalStateException("No generic payload: $because")
         }
-        return Plan.Generic(covering)
+        return Plan.Generic(covering, tier)
     }
 
     /**

@@ -8,7 +8,7 @@ package dev.busung.s25uroot
  * thing to learn next to the install card, and one of its two questions ("universal root") made a claim about
  * the phone that is not true: this chain needs a payload like any other, it just does not need a *helper*. So
  * it is a row here instead the same list, the same controls, the same Next and both of the questions the
- * card asked are answered by the row itself: one row per KernelSU per [PayloadTier], which is six.
+ * card asked are answered by the row itself: one row per KernelSU per [PayloadTier], which is nine.
  *
  * ## Why the universal rows are never narrowed by the device toggle
  *
@@ -34,6 +34,11 @@ package dev.busung.s25uroot
  *   does not read, and reading it here would be a network call per row. Its row describes the tier instead,
  *   and a run on a kernel the daemon has no module for refuses with the feed's own sentence after the tap,
  *   before a byte is downloaded, which is the trade the row makes rather than a promise it cannot keep.
+ * - the **hiding** tier gets the same answer the device tier gets, because its feed is read: the sheet's
+ *   caller reads the second generic feed once and hands [visibleUniversalChoices] the flavours it found a
+ *   hiding daemon for, which is exactly what a hiding run needs to resolve. A source that publishes none for
+ *   this phone's kernel is therefore a row the sheet does not draw, rather than a row whose only outcome is
+ *   the run's own refusal - and the plain generic row is what covers such a phone instead.
  */
 internal sealed interface PayloadChoice {
 
@@ -128,34 +133,43 @@ internal val allUniversalChoices: List<PayloadChoice.Universal> =
  * publish, and this is not published by a source. Threading the toggle in here would be the change that made
  * the sheet hide this path on a phone with no entry of its own which is `PayloadChoiceTest`'s first case.
  *
- * [deviceCoverage] is the one thing that does take a row away, and it is a fact about the device tier alone:
- * the flavours the read sources have an entry for. That tier stages an entry out of a catalog and nothing else,
- * so a flavour with none is a row whose only outcome is the refusal the run produces after the tap - and the
- * sheet hides it rather than leading someone to that refusal by name. Null is "the sources have not been
- * read", which is the state the sheet holds while a read is in flight and after one that failed: nothing is
- * known about this phone then, and every row is listed rather than the app blaming a device for a read it
- * never made.
+ * [deviceCoverage] and [susfsCoverage] are the two things that do take a row away, one per tier that stages
+ * something a source publishes: the flavours the read sources have an entry for, and the flavours they
+ * publish a hiding daemon for. Each of those tiers stages exactly that and nothing else, so a flavour with
+ * neither is a row whose only outcome is the refusal the run produces after the tap - and the sheet hides it
+ * rather than leading someone to that refusal by name. Null is "the sources have not been read", which is the
+ * state the sheet holds while a read is in flight and after one that failed: nothing is known then, and every
+ * row is listed rather than the app blaming a device for a read it never made. The generic tier has no such
+ * parameter because it has no such answer: it falls back in the one direction that cannot mislead.
  */
 internal fun visibleUniversalChoices(
     flavor: KernelSuFlavor?,
     query: String,
     deviceCoverage: Set<KernelSuFlavor>? = null,
+    susfsCoverage: Set<KernelSuFlavor>? = null,
 ): List<PayloadChoice.Universal> = allUniversalChoices.filter { choice ->
     (flavor == null || choice.flavor == flavor) &&
         choice.matchesQuery(query) &&
-        choice.hasPayloadFor(deviceCoverage)
+        choice.hasPayloadFor(deviceCoverage, susfsCoverage)
 }
 
 /**
  * Whether the sheet has something behind this row.
  *
- * Only the device tier can answer no, because only it stages what the app does not already hold everywhere:
- * the generic daemon is a feed read the run makes for itself, and a row for it is a row on any phone. A device
- * row is an entry in a catalog the sheet has read, so a flavour that entry is missing for is a row with
- * nothing behind it - and the tier's engine, not the row, is what covers such a phone.
+ * The two tiers that stage what a source publishes can answer no, and each asks about its own feed: an entry
+ * in the catalog for the device tier, a daemon carrying the hiding support for the hiding one. The generic row
+ * cannot, and that is the whole of its rule - it is the tier that covers a phone nothing was published for,
+ * so a sheet that hid it over a feed would hide the one row that can always be run. A null for either set is
+ * "not read", which keeps the row: see [visibleUniversalChoices].
  */
-private fun PayloadChoice.Universal.hasPayloadFor(deviceCoverage: Set<KernelSuFlavor>?): Boolean =
-    tier != PayloadTier.Device || deviceCoverage == null || flavor in deviceCoverage
+private fun PayloadChoice.Universal.hasPayloadFor(
+    deviceCoverage: Set<KernelSuFlavor>?,
+    susfsCoverage: Set<KernelSuFlavor>?,
+): Boolean = when (tier) {
+    PayloadTier.Device -> deviceCoverage == null || flavor in deviceCoverage
+    PayloadTier.Susfs -> susfsCoverage == null || flavor in susfsCoverage
+    PayloadTier.Generic -> true
+}
 
 /**
  * The sheet's two groups, in the order it draws them. The universal rows lead, then what the sources publish.
@@ -194,8 +208,10 @@ internal fun payloadRows(
     flavor: KernelSuFlavor?,
     /** The flavours the read sources cover, or null while they have not been read - see [visibleUniversalChoices]. */
     deviceCoverage: Set<KernelSuFlavor>? = null,
+    /** The flavours they publish a hiding daemon for, on the same terms as [deviceCoverage]. */
+    susfsCoverage: Set<KernelSuFlavor>? = null,
 ): PayloadRows = PayloadRows(
-    universal = visibleUniversalChoices(flavor, query, deviceCoverage),
+    universal = visibleUniversalChoices(flavor, query, deviceCoverage, susfsCoverage),
     device = visibleTargets(profiles, device, fitsDeviceOnly, query, flavor)
         .map(PayloadChoice::Device),
 )

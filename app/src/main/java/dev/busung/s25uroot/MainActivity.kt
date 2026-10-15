@@ -1452,6 +1452,7 @@ private fun RootApp(
                                 when (universal.tier) {
                                     PayloadTier.Device -> R.string.universal_choice_device
                                     PayloadTier.Generic -> R.string.universal_choice_generic
+                                    PayloadTier.Susfs -> R.string.universal_choice_susfs
                                 },
                             ),
                         )
@@ -7421,7 +7422,20 @@ private fun TargetSelectionSheet(
     } else {
         null
     }
-    val rows = remember(catalog.profiles, showOnlyMyDevice, device, query, flavorFilter, deviceCoverage) {
+    // The hiding tier's own version of that, and it comes down with the catalog read rather than from a
+    // resolution here: its feed is a second file the sources publish, and the read that answers for it is
+    // the ViewModel's. Null is "not read" as above, and the rows are listed on it - see
+    // [visibleUniversalChoices].
+    val susfsCoverage = if (catalogRead) catalog.susfsCoverage else null
+    val rows = remember(
+        catalog.profiles,
+        showOnlyMyDevice,
+        device,
+        query,
+        flavorFilter,
+        deviceCoverage,
+        susfsCoverage,
+    ) {
         payloadRows(
             profiles = catalog.profiles,
             device = device,
@@ -7429,6 +7443,7 @@ private fun TargetSelectionSheet(
             query = query,
             flavor = flavorFilter,
             deviceCoverage = deviceCoverage,
+            susfsCoverage = susfsCoverage,
         )
     }
     val selected = rows.all.firstOrNull { it.key == selectedKey }
@@ -7939,11 +7954,22 @@ private fun UniversalPayloadRow(
                         when (choice.tier) {
                             PayloadTier.Device -> R.string.universal_choice_device
                             PayloadTier.Generic -> R.string.universal_choice_generic
+                            PayloadTier.Susfs -> R.string.universal_choice_susfs
                         },
                     ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // The hiding row says what it is instead of only where it comes from, because the two rows
+                // above and below it are the same flavour and the same daemon - the suffix is the only thing
+                // on the screen that distinguishes them, and "SUSFS" is not a word the sheet has used before.
+                if (choice.tier == PayloadTier.Susfs) {
+                    Text(
+                        stringResource(R.string.universal_choice_susfs_note),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (choice.tier == PayloadTier.Device && entry != null) {
                     Text(
                         stringResource(R.string.universal_choice_stages, entry.displayName),
